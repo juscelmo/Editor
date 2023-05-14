@@ -1,0 +1,105 @@
+import os
+import tkinter as tk
+from tkinter import filedialog, messagebox
+
+# Função para selecionar e abrir um arquivo
+def open_file():
+    # Mostra uma janela de seleção de arquivo
+    file_path = filedialog.askopenfilename(filetypes=[('Arquivos de Texto', '*.txt'), ('Arquivos XML', '*.xml'), ('Arquivos INI', '*.ini'), ('Arquivos HTML', '*.htm;*.html')])
+
+    # Se nenhum arquivo foi selecionado, retorna sem fazer nada
+    if not file_path:
+        return
+
+    # Abre o arquivo selecionado
+    try:
+        with open(file_path, 'r') as f:
+            file_text.delete('1.0', tk.END)
+            file_text.insert('1.0', f.read())
+            status_bar.config(text=f'Arquivo aberto: {file_path}')
+    except Exception as e:
+        messagebox.showerror('Erro', f'Erro ao abrir o arquivo: {str(e)}')
+
+# Função para salvar o arquivo atual
+def save_file():
+    # Se nenhum arquivo está aberto, retorna sem fazer nada
+    if not file_path:
+        return
+
+    # Salva o conteúdo do editor para o arquivo
+    try:
+        with open(file_path, 'w') as f:
+            f.write(file_text.get('1.0', tk.END))
+            status_bar.config(text=f'Arquivo salvo: {file_path}')
+    except Exception as e:
+        messagebox.showerror('Erro', f'Erro ao salvar o arquivo: {str(e)}')
+
+# Cria a janela principal
+root = tk.Tk()
+root.title('Editor de Arquivos')
+root.geometry('800x600')
+
+# Cria o menu
+menu_bar = tk.Menu(root)
+file_menu = tk.Menu(menu_bar, tearoff=0)
+file_menu.add_command(label='Abrir', command=open_file)
+file_menu.add_command(label='Salvar', command=save_file)
+file_menu.add_separator()
+file_menu.add_command(label='Sair', command=root.quit)
+menu_bar.add_cascade(label='Arquivo', menu=file_menu)
+root.config(menu=menu_bar)
+
+# Cria a barra de status
+status_bar = tk.Label(root, text='Nenhum arquivo aberto', bd=1, relief=tk.SUNKEN, anchor=tk.W)
+status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+# Cria a área de edição de texto
+file_text = tk.Text(root)
+file_text.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+# Obtém o caminho da pasta atual
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Obtém todos os arquivos na pasta atual com as extensões desejadas
+files = [f for f in os.listdir(current_dir) if os.path.isfile(os.path.join(current_dir, f)) and f.endswith(('.txt', '.xml', '.ini', '.htm'))]
+
+# Mostra os arquivos na lista
+file_list = tk.Listbox(root)
+for f in files:
+    file_list.insert(tk.END, f)
+file_list.pack(side=tk.LEFT, fill=tk.Y)
+
+# Define a função que será executada quando um arquivo na lista for selecionado
+def select_file(event):
+    global file_path
+    # Obtém o caminho completo do arquivo selecionado
+    file_name = file_list.get(file_list.curselection())
+    file_path = os.path.join(current_dir, file_name)
+
+    # Abre o arquivo selecionado
+    try:
+        with open(file_path, 'r') as f:
+            file_text.delete('1.0', tk.END)
+            file_text.insert('1.0', f.read())
+            status_bar.config(text=f'Arquivo aberto: {file_path}')
+    except Exception as e:
+        messagebox.showerror('Erro', f'Erro ao abrir o arquivo: {str(e)}')
+
+# Define a função que será executada quando a janela for fechada
+def on_closing():
+    # Verifica se o usuário deseja salvar as alterações antes de sair
+    if file_path and file_text.edit_modified():
+        if messagebox.askyesno('Salvar alterações?', 'Deseja salvar as alterações antes de sair?'):
+            save_file()
+
+    # Fecha a janela
+    root.destroy()
+
+# Conecta a função select_file ao evento de seleção na lista de arquivos
+file_list.bind('<<ListboxSelect>>', select_file)
+
+# Define a função que será executada quando a janela for fechada
+root.protocol('WM_DELETE_WINDOW', on_closing)
+
+# Inicia o loop principal do Tkinter
+root.mainloop()
