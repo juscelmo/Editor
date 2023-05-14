@@ -1,174 +1,370 @@
-import os
-import tkinter as tk
-from tkinter import filedialog, messagebox
+package com.l2jmega.gameserver.model;
 
-# Função para selecionar e abrir um arquivo
-def open_file():
-    # Mostra uma janela de seleção de arquivo
-    file_path = filedialog.askopenfilename(filetypes=[('Arquivos de Texto', '*.txt'), ('Arquivos XML', '*.xml'), ('Arquivos INI', '*.ini'), ('Arquivos HTML', '*.htm;*.html')])
+import java.util.concurrent.ScheduledFuture;
 
-    # Se nenhum arquivo foi selecionado, retorna sem fazer nada
-    if not file_path:
-        return
+import com.l2jmega.commons.concurrent.ThreadPool;
 
-    # Abre o arquivo selecionado
-    try:
-        with open(file_path, 'r') as f:
-            file_text.delete('1.0', tk.END)
-            file_text.insert('1.0', f.read())
-            status_bar.config(text=f'Arquivo aberto: {file_path}')
-    except Exception as e:
-        messagebox.showerror('Erro', f'Erro ao abrir o arquivo: {str(e)}')
-def create_widgets():
-    # Adiciona a lista de arquivos na janela
-    global file_list
-    file_list = tk.Listbox(root, width=50, height=20, font=('Consolas', 12))
-    file_list.pack(side=tk.LEFT, fill=tk.BOTH)
+import com.l2jmega.Config;
+import com.l2jmega.events.TvT;
+import com.l2jmega.gameserver.model.actor.instance.Player;
+import com.l2jmega.gameserver.model.base.ClassId;
+import com.l2jmega.gameserver.model.location.SpawnLocation;
+import com.l2jmega.gameserver.model.zone.ZoneId;
+import com.l2jmega.gameserver.network.SystemMessageId;
+import com.l2jmega.gameserver.network.clientpackets.Say2;
+import com.l2jmega.gameserver.network.serverpackets.ConfirmDlg;
+import com.l2jmega.gameserver.network.serverpackets.CreatureSay;
+import com.l2jmega.gameserver.network.serverpackets.ExShowScreenMessage;
+import com.l2jmega.gameserver.network.serverpackets.SystemMessage;
+import com.l2jmega.gameserver.util.Broadcast;
+import com.l2jmega.util.Rnd;
 
-    # Adiciona a barra de rolagem vertical para a lista de arquivos
-    scrollbar = tk.Scrollbar(root, command=file_list.yview)
-    scrollbar.pack(side=tk.LEFT, fill=tk.Y)
-    file_list.config(yscrollcommand=scrollbar.set)
+/**
+ * A datatype used to retain informations for announcements. It notably holds a {@link ScheduledFuture}.
+ */
+public class Announcement implements Runnable
+{
+	protected final String _message;
+	
+	protected int _value;
+	protected boolean _auto;
+	protected boolean _unlimited;
+	
+	protected int _initialDelay;
+	protected int _delay;
+	protected int _limit;
+	protected int _tempLimit; // Temporary limit, used by current timer.
+	
+	protected ScheduledFuture<?> _task;
+	
+	public Announcement(String message, int value)
+	{
+		_message = message;
+		_value = value;
+	}
+	
+	public Announcement(String message, int value, boolean auto, int initialDelay, int delay, int limit)
+	{
+		_message = message;
+		_value = value;
+		_auto = auto;
+		_initialDelay = initialDelay;
+		_delay = delay;
+		_limit = limit;
+		
+		if (_auto)
+		{
+			switch (_limit)
+			{
+				case 0: // unlimited
+					_task = ThreadPool.scheduleAtFixedRate(this, _initialDelay * 1000, _delay * 1000); // self schedule at fixed rate
+					_unlimited = true;
+					break;
+					
+				default:
+					_task = ThreadPool.schedule(this, _initialDelay * 1000); // self schedule (initial)
+					_tempLimit = _limit;
+					break;
+			}
+		}
+	}
+	
+	@Override
+	public void run()
+	{
+		if (!_unlimited)
+		{
+			if (_tempLimit == 0)
+				return;
+			
+			_task = ThreadPool.schedule(this, _delay * 1000); // self schedule (worker)
+			_tempLimit--;
+		}
+		Broadcast.announceToOnlinePlayers(_message, _value);
+	}
+	
+	public String getMessage()
+	{
+		return _message;
+	}
+	
+	public int isCustomValue()
+	{
+		return _value;
+	}
+	
+	public boolean isAuto()
+	{
+		return _auto;
+	}
+	
+	public int getInitialDelay()
+	{
+		return _initialDelay;
+	}
+	
+	public int getDelay()
+	{
+		return _delay;
+	}
+	
+	public int getLimit()
+	{
+		return _limit;
+	}
+	
+	public void stopTask()
+	{
+		if (_task != null)
+		{
+			_task.cancel(true);
+			_task = null;
+		}
+	}
+	
+	public void reloadTask()
+	{
+		stopTask();
+		
+		if (_auto)
+		{
+			switch (_limit)
+			{
+				case 0: // unlimited
+					_task = ThreadPool.scheduleAtFixedRate(this, _initialDelay * 1000, _delay * 1000); // self schedule at fixed rate
+					_unlimited = true;
+					break;
+					
+				default:
+					_task = ThreadPool.schedule(this, _initialDelay * 1000); // self schedule (initial)
+					_tempLimit = _limit;
+					break;
+			}
+		}
+	}
+	
+	public static void announceToPlayers(String message)
+	{
+		for (Player player : World.getInstance().getPlayers())
+			player.sendMessage(message);
+	}
+	
+	public static void announceToPlayers(SystemMessage sm)
+	{
+		Broadcast.toAllOnlinePlayers(sm);
+	}
+	
+	public static void announcePvP(String message)
+	{
+		for (Player player : World.getInstance().getPlayers())
+		{
+			if (!player.isGM())
+				player.sendMessage(message);
+		}
+	}
+	
+	public static void AnnounceEvents(String text)
+	{
+		CreatureSay cs = new CreatureSay(0, Config.ANNOUNCE_ID_EVENT, "", "" + text);
+		
+		for (Player player : World.getInstance().getPlayers())
+		{
+			if (player != null && player.isOnline())
+				player.sendPacket(cs);
+		}
+	}
+	
+	public static void Announce(String text)
+	{
+		CreatureSay cs = new CreatureSay(0, Config.ANNOUNCE_ID, "", "" + text);
+		
+		for (Player player : World.getInstance().getPlayers())
+		{
+			if (player != null && player.isOnline())
+				player.sendPacket(cs);
+		}
+	}
+	
+	public static void AnnounceDropItem(SystemMessage msg)
+	{
+		CreatureSay cs = new CreatureSay(0, Config.ANNOUNCE_ID, "", "" + msg);
+		
+		for (Player player : World.getInstance().getPlayers())
+		{
+			if (player != null && player.isOnline())
+				player.sendPacket(cs);
+		}
+	}
+	
+	public static void AnnounceScreen(String text)
+	{
+		CreatureSay cs = new CreatureSay(0, Config.ANNOUNCE_ID, "", "" + text);
+		
+		for (Player player : World.getInstance().getPlayers())
+		{
+			if (player != null && player.isOnline())
+				player.sendPacket(cs);
+		}
+	}
+	
+	public static void SelfAnnounce(String text)
+	{
+		CreatureSay cs = new CreatureSay(0, 17, "", "" + text);
+		
+		for (Player player : World.getInstance().getPlayers())
+		{
+			if (player != null && player.isOnline())
+				player.sendPacket(cs);
+		}
+	}
+	
+	public static void SelfAnnounceScreen(String text)
+	{
+		ExShowScreenMessage msg = new ExShowScreenMessage("SYS:" + text, 6000);
+		
+		for (Player player : World.getInstance().getPlayers())
+		{
+			if (player != null && player.isOnline())
+				player.sendPacket(msg);
+		}
+	}
+	
+	public static void AnnouncePM(String text)
+	{
+		CreatureSay cs = new CreatureSay(0, Say2.TELL, "", "" + text);
+		
+		for (Player player : World.getInstance().getPlayers())
+		{
+			if (player != null && player.isOnline())
+				player.sendPacket(cs);
+		}
+	}
+	
+	public static boolean pvp_register = false;
+	
+	public static void PvPAnnounce(String text)
+	{
+		pvp_register = true;
+		
+		CreatureSay cs = new CreatureSay(0, Config.ANNOUNCE_ID_EVENT, "", "" + text);
+		
+		for (Player player : World.getInstance().getPlayers())
+		{
+			if (player != null && player.isOnline())
+			{
+				player.sendPacket(cs);
+				
+				ThreadPool.schedule(new Runnable()
+				{
+					@Override
+					public void run()
+					{
+						pvp_register = false;
+					}
+				}, 46000);
+				
+				final boolean bishop = (player.getClassId() == ClassId.BISHOP || player.getClassId() == ClassId.CARDINAL || player.getClassId() == ClassId.SHILLIEN_ELDER || player.getClassId() == ClassId.SHILLIEN_SAINT || player.getClassId() == ClassId.EVAS_SAINT || player.getClassId() == ClassId.ELVEN_ELDER);
+				
+				if (!(player.isOlympiadProtection() || player.isCursedWeaponEquipped() || player.isInObserverMode() || player.getFirstLog() || player._inEventCTF || player._inEventTvT || player.isInsideZone(ZoneId.PVP_CUSTOM) || player.isInsideZone(ZoneId.CUSTOM) || player.isInsideZone(ZoneId.RAID) || player.isInsideZone(ZoneId.RAID_NO_FLAG) || player.isInsideZone(ZoneId.FLAG) || player.isAio() || bishop) && Config.SCREN_MSG_PVP)
+				{
+					SpawnLocation _position = new SpawnLocation(Config.pvp_locx + Rnd.get(-100, 100), Config.pvp_locy + Rnd.get(-100, 100), Config.pvp_locz, 0);
 
-    # Adiciona a barra de rolagem horizontal para o editor de texto
-    hscrollbar = tk.Scrollbar(root, orient=tk.HORIZONTAL, command=file_text.xview)
-    hscrollbar.pack(side=tk.BOTTOM, fill=tk.X)
-    file_text.config(xscrollcommand=hscrollbar.set)
-
-    # Adiciona os números de linha ao editor de texto
-    global line_numbers
-    line_numbers = tk.Text(root, width=4, padx=5, takefocus=0, border=0, background='lightgray', state=tk.DISABLED)
-    line_numbers.pack(side=tk.LEFT, fill=tk.Y)
-
-    # Adiciona o editor de texto na janela
-    global file_text
-    file_text = tk.Text(root, font=('Consolas', 12), undo=True)
-    file_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-    # Conecta a função update_line_numbers ao evento de rolagem no editor de texto
-    file_text.bind('<MouseWheel>', update_line_numbers)
-    file_text.bind('<Key>', update_line_numbers)
-
-    # Adiciona a barra de status na janela
-    global status_bar
-    status_bar = tk.Label(root, text='Bem-vindo ao editor', relief=tk.SUNKEN, anchor=tk.W)
-    status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-
-    # Atualiza a lista de arquivos e o editor de texto
-    update_file_list()
-    update_editor()
-    def update_editor(event=None):
-    # Obtém o arquivo selecionado na lista
-    index = file_list.curselection()
-    if not index:
-        return
-    filename = file_list.get(index)
-
-    # Abre o arquivo selecionado e mostra seu conteúdo no editor de texto
-    with open(filename, 'r') as f:
-        file_text.delete('1.0', tk.END)
-        file_text.insert('1.0', f.read())
-
-    # Atualiza o título da janela
-    root.title(f'Editor - {filename}')
-
-    # Atualiza a barra de status
-    status_bar.config(text=f'Arquivo carregado: {filename}')
-
-    # Atualiza os números de linha
-    update_line_numbers()
-
-def update_line_numbers(event=None):
-    # Atualiza os números de linha no widget line_numbers
-    line_numbers.config(state=tk.NORMAL)
-    line_numbers.delete('1.0', tk.END)
-    text = file_text.get('1.0', tk.END)
-    lines = text.split('\n')
-    for i, line in enumerate(lines, 1):
-        line_numbers.insert(tk.END, f'{i}\n')
-    line_numbers.config(state=tk.DISABLED)
-
-
-# Função para salvar o arquivo atual
-def save_file():
-    # Se nenhum arquivo está aberto, retorna sem fazer nada
-    if not file_path:
-        return
-
-    # Salva o conteúdo do editor para o arquivo
-    try:
-        with open(file_path, 'w') as f:
-            f.write(file_text.get('1.0', tk.END))
-            status_bar.config(text=f'Arquivo salvo: {file_path}')
-    except Exception as e:
-        messagebox.showerror('Erro', f'Erro ao salvar o arquivo: {str(e)}')
-
-# Cria a janela principal
-root = tk.Tk()
-root.title('Editor de Arquivos')
-root.geometry('800x600')
-
-# Cria o menu
-menu_bar = tk.Menu(root)
-file_menu = tk.Menu(menu_bar, tearoff=0)
-file_menu.add_command(label='Abrir', command=open_file)
-file_menu.add_command(label='Salvar', command=save_file)
-file_menu.add_separator()
-file_menu.add_command(label='Sair', command=root.quit)
-menu_bar.add_cascade(label='Arquivo', menu=file_menu)
-root.config(menu=menu_bar)
-
-# Cria a barra de status
-status_bar = tk.Label(root, text='Nenhum arquivo aberto', bd=1, relief=tk.SUNKEN, anchor=tk.W)
-status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-
-# Cria a área de edição de texto
-file_text = tk.Text(root)
-file_text.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-
-# Obtém o caminho da pasta atual
-current_dir = os.path.dirname(os.path.abspath(__file__))
-
-# Obtém todos os arquivos na pasta atual com as extensões desejadas
-files = [f for f in os.listdir(current_dir) if os.path.isfile(os.path.join(current_dir, f)) and f.endswith(('.txt', '.xml', '.ini', '.htm'))]
-
-# Mostra os arquivos na lista
-file_list = tk.Listbox(root)
-for f in files:
-    file_list.insert(tk.END, f)
-file_list.pack(side=tk.LEFT, fill=tk.Y)
-
-# Define a função que será executada quando um arquivo na lista for selecionado
-def select_file(event):
-    global file_path
-    # Obtém o caminho completo do arquivo selecionado
-    file_name = file_list.get(file_list.curselection())
-    file_path = os.path.join(current_dir, file_name)
-
-    # Abre o arquivo selecionado
-    try:
-        with open(file_path, 'r') as f:
-            file_text.delete('1.0', tk.END)
-            file_text.insert('1.0', f.read())
-            status_bar.config(text=f'Arquivo aberto: {file_path}')
-    except Exception as e:
-        messagebox.showerror('Erro', f'Erro ao abrir o arquivo: {str(e)}')
-
-# Define a função que será executada quando a janela for fechada
-def on_closing():
-    # Verifica se o usuário deseja salvar as alterações antes de sair
-    if file_path and file_text.edit_modified():
-        if messagebox.askyesno('Salvar alterações?', 'Deseja salvar as alterações antes de sair?'):
-            save_file()
-
-    # Fecha a janela
-    root.destroy()
-
-# Conecta a função select_file ao evento de seleção na lista de arquivos
-file_list.bind('<<ListboxSelect>>', select_file)
-
-# Define a função que será executada quando a janela for fechada
-root.protocol('WM_DELETE_WINDOW', on_closing)
-
-# Inicia o loop principal do Tkinter
-root.mainloop()
+					ConfirmDlg confirm = new ConfirmDlg(SystemMessageId.EVENT.getId());
+					confirm.addString("Let's go to PvpZone?");
+					confirm.addZoneName(_position);
+					confirm.addTime(45000);
+					confirm.addRequesterId(player.getObjectId());
+					player.sendPacket(confirm);
+				}
+			}
+		}
+		
+		cs = null;
+	}
+	
+	public static boolean tvt_register = false;
+	
+	public static void TvTAnnounce(String text)
+	{
+		tvt_register = true;
+		
+		CreatureSay cs = new CreatureSay(0, Config.ANNOUNCE_ID_EVENT, "", "" + text);
+		
+		for (Player player : World.getInstance().getPlayers())
+		{
+			if (player != null && player.isOnline())
+			{
+				player.sendPacket(cs);
+				
+				ThreadPool.schedule(new Runnable()
+				{
+					@Override
+					public void run()
+					{
+						tvt_register = false;
+					}
+				}, 46000);
+				
+				final boolean bishop = (player.getClassId() == ClassId.BISHOP || player.getClassId() == ClassId.CARDINAL || player.getClassId() == ClassId.SHILLIEN_ELDER || player.getClassId() == ClassId.SHILLIEN_SAINT || player.getClassId() == ClassId.EVAS_SAINT || player.getClassId() == ClassId.ELVEN_ELDER);
+				
+				if (!(player.isOlympiadProtection() || player.getLevel() < TvT.get_minlvl() || player.getLevel() > TvT.get_maxlvl() || player.isCursedWeaponEquipped() || player.isInObserverMode() || player.getFirstLog() || player._inEventCTF || player._inEventTvT || player.isAio() || bishop) && Config.SCREN_MSG)
+				{
+					SpawnLocation _position = new SpawnLocation(TvT._npcX, TvT._npcY, TvT._npcX, 0);
+					ConfirmDlg confirm = new ConfirmDlg(SystemMessageId.EVENT.getId());
+					confirm.addString("Do you want to register on TvT?");
+					confirm.addZoneName(_position);
+					confirm.addTime(45000);
+					confirm.addRequesterId(player.getObjectId());
+					player.sendPacket(confirm);
+				}
+			}
+		}
+		
+		cs = null;
+	}
+	
+	public static boolean isSummoning = false;
+	
+	public static void ArenaAnnounce(String text)
+	{
+		isSummoning = true;
+		
+		CreatureSay cs = new CreatureSay(0, Config.ANNOUNCE_ID_EVENT, "", "" + text);
+		
+		for (Player player : World.getInstance().getPlayers())
+		{
+			if (player != null && player.isOnline())
+			{
+				player.sendPacket(cs);
+				
+				if (Config.TOURNAMENT_EVENT_SUMMON)
+				{
+					if (!player.isAio() || !player.isAioEterno() || !(player.isInsideZone(ZoneId.TOURNAMENT) || player.isDead() || player._inEventTvT  || player._inEventCTF || player.isInArenaEvent() || player.isInsideZone(ZoneId.BOSS) || player.isInsideZone(ZoneId.RAID) || player.isInStoreMode() || player.isRooted() || player.getKarma() > 0 || player.isInOlympiadMode() || player.isOlympiadProtection() || player.isFestivalParticipant() || player.getFirstLog()))
+					{
+						
+						ThreadPool.schedule(new Runnable()
+						{
+							@Override
+							public void run()
+							{
+								isSummoning = false;
+							}
+						}, 31000);
+						
+						SpawnLocation _position = new SpawnLocation(Config.Tournament_locx + Rnd.get(-100, 100), Config.Tournament_locy + Rnd.get(-100, 100), Config.Tournament_locz, 0);
+						
+						ConfirmDlg confirm = new ConfirmDlg(SystemMessageId.EVENT.getId());
+						confirm.addString("Do you want to go to the Tournament?");
+						confirm.addZoneName(_position);
+						confirm.addTime(30000);
+						confirm.addRequesterId(player.getObjectId());
+						player.sendPacket(confirm);
+					}
+					
+				}
+			}
+		}
+		
+		cs = null;
+	}
+}
