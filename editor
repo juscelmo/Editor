@@ -19,6 +19,75 @@ def open_file():
             status_bar.config(text=f'Arquivo aberto: {file_path}')
     except Exception as e:
         messagebox.showerror('Erro', f'Erro ao abrir o arquivo: {str(e)}')
+def create_widgets():
+    # Adiciona a lista de arquivos na janela
+    global file_list
+    file_list = tk.Listbox(root, width=50, height=20, font=('Consolas', 12))
+    file_list.pack(side=tk.LEFT, fill=tk.BOTH)
+
+    # Adiciona a barra de rolagem vertical para a lista de arquivos
+    scrollbar = tk.Scrollbar(root, command=file_list.yview)
+    scrollbar.pack(side=tk.LEFT, fill=tk.Y)
+    file_list.config(yscrollcommand=scrollbar.set)
+
+    # Adiciona a barra de rolagem horizontal para o editor de texto
+    hscrollbar = tk.Scrollbar(root, orient=tk.HORIZONTAL, command=file_text.xview)
+    hscrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+    file_text.config(xscrollcommand=hscrollbar.set)
+
+    # Adiciona os números de linha ao editor de texto
+    global line_numbers
+    line_numbers = tk.Text(root, width=4, padx=5, takefocus=0, border=0, background='lightgray', state=tk.DISABLED)
+    line_numbers.pack(side=tk.LEFT, fill=tk.Y)
+
+    # Adiciona o editor de texto na janela
+    global file_text
+    file_text = tk.Text(root, font=('Consolas', 12), undo=True)
+    file_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    # Conecta a função update_line_numbers ao evento de rolagem no editor de texto
+    file_text.bind('<MouseWheel>', update_line_numbers)
+    file_text.bind('<Key>', update_line_numbers)
+
+    # Adiciona a barra de status na janela
+    global status_bar
+    status_bar = tk.Label(root, text='Bem-vindo ao editor', relief=tk.SUNKEN, anchor=tk.W)
+    status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+    # Atualiza a lista de arquivos e o editor de texto
+    update_file_list()
+    update_editor()
+    def update_editor(event=None):
+    # Obtém o arquivo selecionado na lista
+    index = file_list.curselection()
+    if not index:
+        return
+    filename = file_list.get(index)
+
+    # Abre o arquivo selecionado e mostra seu conteúdo no editor de texto
+    with open(filename, 'r') as f:
+        file_text.delete('1.0', tk.END)
+        file_text.insert('1.0', f.read())
+
+    # Atualiza o título da janela
+    root.title(f'Editor - {filename}')
+
+    # Atualiza a barra de status
+    status_bar.config(text=f'Arquivo carregado: {filename}')
+
+    # Atualiza os números de linha
+    update_line_numbers()
+
+def update_line_numbers(event=None):
+    # Atualiza os números de linha no widget line_numbers
+    line_numbers.config(state=tk.NORMAL)
+    line_numbers.delete('1.0', tk.END)
+    text = file_text.get('1.0', tk.END)
+    lines = text.split('\n')
+    for i, line in enumerate(lines, 1):
+        line_numbers.insert(tk.END, f'{i}\n')
+    line_numbers.config(state=tk.DISABLED)
+
 
 # Função para salvar o arquivo atual
 def save_file():
